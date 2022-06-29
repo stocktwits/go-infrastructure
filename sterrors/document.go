@@ -3,6 +3,7 @@ package sterrors
 import (
 	"fmt"
 	"io"
+	"sort"
 )
 
 func GetDocumentMd(w io.Writer, config ErrorConfig, appname string) error {
@@ -26,11 +27,22 @@ func GetDocumentMd(w io.Writer, config ErrorConfig, appname string) error {
 		return err
 	}
 
-	for code, info := range config {
+	codes := []ErrorCode{}
+	for code := range config {
+		codes = append(codes, code)
+	}
+
+	sort.Slice(codes, func(i, j int) bool {
+		return codes[i] < codes[j]
+	})
+
+	for _, code := range codes {
+		info := config[code]
 		_, err = fmt.Fprintf(w, "|%d|%s|%s|%d|\n", code, info.Type, info.Message, info.Http_code)
 		if err != nil {
 			return err
 		}
+
 	}
 
 	return nil
