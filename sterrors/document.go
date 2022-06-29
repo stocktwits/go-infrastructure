@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-func (e *ErrorFactory) GetDocumentMd(w io.Writer, appname string) error {
+func GetDocumentMd(w io.Writer, config ErrorConfig, appname string) error {
 	_, err := fmt.Fprintf(w, "# Application Errors Summary\n\n")
 	if err != nil {
 		return err
@@ -26,7 +26,7 @@ func (e *ErrorFactory) GetDocumentMd(w io.Writer, appname string) error {
 		return err
 	}
 
-	for code, info := range e.config {
+	for code, info := range config {
 		_, err = fmt.Fprintf(w, "|%d|%s|%s|%d|\n", code, info.Type, info.Message, info.Http_code)
 		if err != nil {
 			return err
