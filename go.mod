@@ -3,8 +3,13 @@ module github.com/stocktwits/go-infrastructure
 go 1.17
 
 require (
+	github.com/aws/aws-sdk-go v1.44.45
 	github.com/oklog/ulid v1.3.1
 	github.com/sirupsen/logrus v1.8.1
+	github.com/vrischmann/envconfig v1.3.0
 )
 
-require golang.org/x/sys v0.0.0-20191026070338-33540a1f6037 // indirect
+require (
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
+	golang.org/x/sys v0.0.0-20211216021012-1d35b9e2eb4e // indirect
+)
