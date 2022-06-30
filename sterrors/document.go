@@ -38,7 +38,7 @@ func GetDocumentMd(w io.Writer, config ErrorConfig, appname string) error {
 
 	for _, code := range codes {
 		info := config[code]
-		_, err = fmt.Fprintf(w, "|%d|%s|%s|%d|\n", code, info.Type, info.Message, info.Http_code)
+		_, err = fmt.Fprintf(w, "|%d|%s|%s|%d|\n", code, info.ErrorType, info.Message, info.Http_code)
 		if err != nil {
 			return err
 		}

@@ -5,7 +5,7 @@ import "fmt"
 type ErrorCode int
 
 type ErrorData struct {
-	Type      string
+	ErrorType string
 	Message   string
 	Http_code int
 }
