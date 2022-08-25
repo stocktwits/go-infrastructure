@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -42,6 +43,25 @@ func InitEnvVars() error {
 	return setEnvVars(path, client)
 }
 
+func retryGetParameters(client *ssm.SSM, input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error) {
+	count := 0
+	for {
+		output, err := client.GetParametersByPath(input)
+
+		if err != nil {
+			if count >= 5 {
+				return nil, err
+			}
+
+			time.Sleep(5 * time.Second)
+			count++
+			continue
+		}
+
+		return output, nil
+	}
+}
+
 func setEnvVars(path string, client *ssm.SSM) error {
 
 	var nextToken *string
@@ -53,7 +73,7 @@ func setEnvVars(path string, client *ssm.SSM) error {
 			NextToken:      nextToken,
 		}
 
-		output, err := client.GetParametersByPath(input)
+		output, err := retryGetParameters(client, input)
 		if err != nil {
 			err = fmt.Errorf("error connecting to ssm store %v", err)
 			return err

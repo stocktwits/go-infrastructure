@@ -45,11 +45,7 @@ var singleLogger *AuditLogger
 var prettyPrint bool
 
 //Local loggers
-var localLoggers map[string]Logger
-
-func init() {
-	localLoggers = make(map[string]Logger)
-}
+var localLoggers map[string]*AuditLogger = make(map[string]*AuditLogger)
 
 //Converts the logrus levels into local levels
 func getLevel(level string) Level {
@@ -139,14 +135,23 @@ type InfoCtx struct {
 
 //A new log entry, this is a log entry to be printed, include commond fields
 type AuditEntry struct {
-	*logrus.Entry
 	auditLogger *AuditLogger
-	*InfoCtx
+	info        *InfoCtx
+	sync.RWMutex
 }
 
 //Json formater
 type STJSONFormater struct {
 	logrus.JSONFormatter
+}
+
+func getFormat() *STJSONFormater {
+	return &STJSONFormater{logrus.JSONFormatter{
+		FieldMap: logrus.FieldMap{
+			logrus.FieldKeyTime: "ts",
+		},
+		PrettyPrint: prettyPrint,
+	}}
 }
 
 //Re-implements Formater to change log level format
@@ -170,70 +175,100 @@ func (f *STJSONFormater) Format(entry *logrus.Entry) ([]byte, error) {
 	return []byte(sdata), nil
 }
 
+func (ae *AuditEntry) copyInfo() *InfoCtx {
+	ae.Lock()
+	defer ae.Unlock()
+
+	newData := map[string]interface{}{}
+	newTags := []string{}
+
+	for k, v := range ae.info.auditData {
+		newData[k] = v
+	}
+
+	newTags = append(newTags, ae.info.auditTags...)
+
+	return &InfoCtx{
+		auditData: newData,
+		auditTags: newTags,
+	}
+}
+
+func (ae *AuditEntry) getEntry() *logrus.Entry {
+	al := ae.auditLogger
+
+	entry := al.logger.WithField("src", al.app)
+
+	entry = entry.WithField("host", al.hostname)
+
+	entry = entry.WithField("sv", SchemaVersion)
+
+	if len(ae.info.auditData) > 0 {
+		entry = entry.WithField("data", ae.info.auditData)
+	}
+
+	if len(ae.info.auditTags) > 0 {
+		entry = entry.WithField("tags", ae.info.auditTags)
+	}
+
+	return entry
+}
+
+func (al *AuditLogger) newAuditEntry() *AuditEntry {
+	return &AuditEntry{
+		auditLogger: al,
+		info: &InfoCtx{
+			auditData: map[string]interface{}{},
+			auditTags: []string{},
+		},
+	}
+}
+
 //This creates a new AuditEntry object with the same values as the original one
 //The modifications done to this entry will not be preserved in the other logs
 func (ae *AuditEntry) NewEntry() Logger {
 	newEntry := ae.auditLogger.newAuditEntry()
 
-	for k, v := range ae.auditData {
+	info := ae.copyInfo()
+
+	for k, v := range info.auditData {
 		newEntry.AddData(k, v)
 	}
 
-	for _, t := range ae.auditTags {
+	for _, t := range info.auditTags {
 		newEntry.AddTag(t)
 	}
 
 	return newEntry
 }
 
-//Links a logger with a context, this is usefull to keep using the same auditEntry
-//in different parts of the application where the context is passed
-func newWithContext(ctx context.Context, ae *AuditEntry) (Logger, context.Context) {
-	var newCtx context.Context
-
-	if infCtx, ok := ctx.Value(InfoCtxKey).(*InfoCtx); ok {
-		nae := ae.auditLogger.newAuditEntry()
-		nae.InfoCtx = infCtx
-		lock.Lock()
-		if len(nae.auditData) > 0 {
-			nae.Entry = nae.WithField("data", nae.auditData)
-		}
-		if len(nae.auditTags) > 0 {
-			nae.Entry = nae.WithField("tags", nae.auditTags)
-		}
-		lock.Unlock()
-
-		return nae, ctx
-	} else {
-		ae.auditData = map[string]interface{}{}
-		ae.auditTags = make([]string, 0)
-
-		ae.AddData("txId", getID())
-		lock.Lock()
-		newCtx = context.WithValue(ctx, InfoCtxKey, ae.InfoCtx)
-		lock.Unlock()
-
-		return ae, newCtx
-	}
-
-}
-
 //Links a logger with a context from an AuditEntry
 func (ae *AuditEntry) NewWithContext(ctx context.Context) (Logger, context.Context) {
-	return newWithContext(ctx, ae)
+	var newCtx context.Context
+
+	nae := ae.auditLogger.newAuditEntry()
+
+	if infCtx, ok := ctx.Value(InfoCtxKey).(*InfoCtx); ok {
+		nae.info = infCtx
+		return nae, ctx
+	} else {
+		nae.AddData("txId", getID())
+
+		nae.Lock()
+		newCtx = context.WithValue(ctx, InfoCtxKey, nae.info)
+		nae.Unlock()
+
+		return nae, newCtx
+	}
 }
 
 //Adds a new entry to the data map
 //This value will be printed in all the logs that uses the same entry object, or that uses the same context
 func (ae *AuditEntry) AddData(key string, value interface{}) Logger {
-	lock.Lock()
-	defer lock.Unlock()
+	ae.Lock()
+	defer ae.Unlock()
 
-	if _, ok := ae.Data["data"]; !ok {
-		ae.Entry = ae.WithField("data", ae.auditData)
-	}
-
-	ae.auditData[key] = value
+	ae.info.auditData[key] = value
 
 	return ae
 
@@ -242,24 +277,19 @@ func (ae *AuditEntry) AddData(key string, value interface{}) Logger {
 //Adds a new tag to the tags array
 //This value will be printed in all the logs that uses the same entry object, or that uses the same context
 func (ae *AuditEntry) AddTag(tag string) Logger {
-	lock.Lock()
-	defer lock.Unlock()
+	ae.Lock()
+	defer ae.Unlock()
 
-	ae.auditTags = append(ae.auditTags, tag)
-
-	if _, ok := ae.Data["tags"]; !ok {
-		ae.Entry = ae.WithField("tags", ae.auditTags)
-	} else {
-		ae.Data["tags"] = ae.auditTags
-	}
+	ae.info.auditTags = append(ae.info.auditTags, tag)
 
 	return ae
 }
 
 func (ae *AuditEntry) AddTags(tags ...string) Logger {
-	for _, tag := range tags {
-		ae.AddTag(tag)
-	}
+	ae.Lock()
+	defer ae.Unlock()
+
+	ae.info.auditTags = append(ae.info.auditTags, tags...)
 
 	return ae
 }
@@ -279,11 +309,7 @@ func (ae *AuditEntry) WithTag(tag string) Logger {
 //Allows to add multiple tags
 //This value will not be printed in other logs
 func (ae *AuditEntry) WithTags(tags ...string) Logger {
-	log := ae.NewEntry()
-	for _, tag := range tags {
-		log = log.AddTag(tag)
-	}
-	return log
+	return ae.NewEntry().AddTags(tags...)
 }
 
 //Creates an error entry in the data map
@@ -292,34 +318,6 @@ func (ae *AuditEntry) WithError(e error) Logger {
 		e = fmt.Errorf("nil error was logged")
 	}
 	return ae.WithData("error", e.Error())
-}
-
-func (al *AuditLogger) newAuditEntry() *AuditEntry {
-
-	entry := al.logger.WithField("src", al.app)
-
-	entry = entry.WithField("host", al.hostname)
-
-	entry = entry.WithField("sv", SchemaVersion)
-
-	return &AuditEntry{
-		Entry:       entry,
-		auditLogger: al,
-		InfoCtx: &InfoCtx{
-			auditData: map[string]interface{}{},
-			auditTags: []string{},
-		},
-	}
-
-}
-
-func getFormat() *STJSONFormater {
-	return &STJSONFormater{logrus.JSONFormatter{
-		FieldMap: logrus.FieldMap{
-			logrus.FieldKeyTime: "ts",
-		},
-		PrettyPrint: prettyPrint,
-	}}
 }
 
 //Creates a new global logger, this is singleton
@@ -396,12 +394,16 @@ func newAuditLogger(module string) *AuditLogger {
 //Creates a new Local Logger, it copies the information from the global one.
 //If the global one is not created the information will be set as UNDEFINED
 func NewLocal(module string) Logger {
+	lock.Lock()
+	defer lock.Unlock()
+
 	if logger, ok := localLoggers[module]; ok {
-		return logger
+		return logger.newAuditEntry()
 	}
 
-	al := newAuditLogger(module)
-	return al.newAuditEntry()
+	localLoggers[module] = newAuditLogger(module)
+
+	return localLoggers[module].newAuditEntry()
 }
 
 //This allows you to create a local copy of the Global Logger

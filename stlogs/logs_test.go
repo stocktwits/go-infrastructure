@@ -257,3 +257,27 @@ func TestWithContext(t *testing.T) {
 	}
 
 }
+
+func TestConcurrency(t *testing.T) {
+	logger := NewLocal("test-concurrency")
+
+	for i := 0; i < 0; i++ {
+		ctx := context.Background()
+		log, ctx := logger.NewWithContext(ctx)
+		log.AddTag("tag")
+
+		log.Info("test 1")
+
+		testPrint(ctx)
+
+		log.Info("test 3")
+	}
+}
+
+func testPrint(ctx context.Context) {
+	logger := NewLocal("test-print")
+	log, _ := logger.NewWithContext(ctx)
+	log.AddTag("tag")
+
+	log.Info("test 2")
+}
