@@ -13,7 +13,7 @@ import (
 )
 
 type ssmConfig struct {
-	Path     string `envconfig:"SSM_PATH"`
+	Path     string `envconfig:"default=NOT_SET,SSM_PATH"`
 	Disabled bool   `envconfig:"default=False,SSM_DISABLED"`
 }
 
@@ -30,6 +30,11 @@ func InitEnvVars() error {
 	}
 
 	path := cfg.Path
+
+	if path == "NOT_SET" {
+		return fmt.Errorf("missing SSM_PATH environment variable")
+	}
+
 	if path == "" {
 		return fmt.Errorf("wrong path configuration")
 	}
