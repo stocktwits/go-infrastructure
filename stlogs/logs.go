@@ -280,7 +280,7 @@ func (ae *AuditEntry) AddTag(tag string) Logger {
 	ae.Lock()
 	defer ae.Unlock()
 
-	ae.info.auditTags = append(ae.info.auditTags, tag)
+	ae.info.addTags(tag)
 
 	return ae
 }
@@ -289,9 +289,25 @@ func (ae *AuditEntry) AddTags(tags ...string) Logger {
 	ae.Lock()
 	defer ae.Unlock()
 
-	ae.info.auditTags = append(ae.info.auditTags, tags...)
+	ae.info.addTags(tags...)
 
 	return ae
+}
+
+func (i *InfoCtx) addTags(tags ...string) {
+	new := append(i.auditTags, tags...)
+	set := make(map[string]interface{})
+
+	for _, t := range new {
+		set[t] = nil
+	}
+
+	reduced := []string{}
+	for k := range set {
+		reduced = append(reduced, k)
+	}
+
+	i.auditTags = reduced
 }
 
 //Creates a new entry and adds the give value to the data map
