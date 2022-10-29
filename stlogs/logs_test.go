@@ -281,3 +281,69 @@ func testPrint(ctx context.Context) {
 
 	log.Info("test 2")
 }
+
+func TestTrack(t *testing.T) {
+	t.Parallel()
+
+	log := NewGlobal("debug", "test track")
+
+	ctx := context.Background()
+
+	log, ctx = log.NewWithContext(ctx)
+
+	test := testtrack{log}
+
+	test.test1(ctx)
+
+	data, err := log.Track().testLevel("debug", "test")
+	if err != nil {
+		t.Fatalf("error printing log %v", err)
+	}
+
+	if len(data) == 0 {
+		t.Fatalf("error no data received")
+	}
+
+	logSt := Log{}
+	err = json.Unmarshal(data, &logSt)
+
+	if err != nil {
+		t.Fatalf("error while parsing log, %v", err)
+	}
+
+	itracks, ok := logSt.Data["track"]
+
+	if !ok {
+		t.Fatalf("error missing track information")
+	}
+
+	tracks, ok := itracks.([]interface{})
+	if !ok {
+		t.Fatalf("error expected tracks as slice of strings")
+	}
+
+	if len(tracks) != 3 {
+		t.Fatalf("wrong number of tracks, expected 3, got %d", len(tracks))
+	}
+
+	for _, itrack := range tracks {
+		_, ok := itrack.(string)
+		if !ok {
+			t.Fatalf("expected track as an string")
+		}
+	}
+}
+
+type testtrack struct {
+	log Logger
+}
+
+func (t *testtrack) test1(ctx context.Context) {
+	_, ctx = t.log.Track().NewWithContext(ctx)
+
+	t.test2(ctx)
+}
+
+func (t *testtrack) test2(ctx context.Context) {
+	_, _ = t.log.Track().NewWithContext(ctx)
+}

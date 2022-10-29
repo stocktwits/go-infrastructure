@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,8 @@ type Logger interface {
 	WithError(err error) Logger
 	NewEntry() Logger
 	NewWithContext(ctx context.Context) (Logger, context.Context)
+	Track() Logger
+	ErrorfTrack(string, ...interface{}) error
 	testLevel(level string, msg string) ([]byte, error)
 }
 
@@ -129,8 +132,9 @@ type AuditLogger struct {
 
 //Data that will be fw using the context
 type InfoCtx struct {
-	auditData map[string]interface{}
-	auditTags []string
+	auditData  map[string]interface{}
+	auditTags  []string
+	calltracks []string
 }
 
 //A new log entry, this is a log entry to be printed, include commond fields
@@ -181,16 +185,19 @@ func (ae *AuditEntry) copyInfo() *InfoCtx {
 
 	newData := map[string]interface{}{}
 	newTags := []string{}
+	newTracks := []string{}
 
 	for k, v := range ae.info.auditData {
 		newData[k] = v
 	}
 
 	newTags = append(newTags, ae.info.auditTags...)
+	newTracks = append(newTracks, ae.info.calltracks...)
 
 	return &InfoCtx{
-		auditData: newData,
-		auditTags: newTags,
+		auditData:  newData,
+		auditTags:  newTags,
+		calltracks: newTracks,
 	}
 }
 
@@ -239,6 +246,10 @@ func (ae *AuditEntry) NewEntry() Logger {
 		newEntry.AddTag(t)
 	}
 
+	for _, t := range info.calltracks {
+		newEntry.addTrack(t)
+	}
+
 	return newEntry
 }
 
@@ -250,16 +261,39 @@ func (ae *AuditEntry) NewWithContext(ctx context.Context) (Logger, context.Conte
 
 	if infCtx, ok := ctx.Value(InfoCtxKey).(*InfoCtx); ok {
 		nae.info = infCtx
-		return nae, ctx
+		newCtx = ctx
 	} else {
 		nae.AddData("txId", getID())
 
 		nae.Lock()
 		newCtx = context.WithValue(ctx, InfoCtxKey, nae.info)
 		nae.Unlock()
-
-		return nae, newCtx
 	}
+
+	return nae, newCtx
+}
+
+func (ae *AuditEntry) addTrack(track string) {
+	ae.Lock()
+	defer ae.Unlock()
+
+	ae.info.calltracks = append(ae.info.calltracks, track)
+}
+
+func (ae *AuditEntry) trackCall() {
+	pc, file, no, ok := runtime.Caller(2)
+	if !ok {
+		ae.addTrack("-- error tracking ---")
+		return
+	}
+
+	details := runtime.FuncForPC(pc)
+	if details == nil {
+		ae.addTrack(fmt.Sprintf("%s:%d %s", file, no, "-- missing function information --"))
+		return
+	}
+
+	ae.addTrack(fmt.Sprintf("%s:%d %s", file, no, details.Name()))
 }
 
 //Adds a new entry to the data map
@@ -272,6 +306,16 @@ func (ae *AuditEntry) AddData(key string, value interface{}) Logger {
 
 	return ae
 
+}
+
+func (ae *AuditEntry) Track() Logger {
+	ae.trackCall()
+
+	if len(ae.info.calltracks) == 0 {
+		return ae
+	}
+
+	return ae.WithData("track", ae.info.calltracks)
 }
 
 //Adds a new tag to the tags array
@@ -333,7 +377,20 @@ func (ae *AuditEntry) WithError(e error) Logger {
 	if e == nil {
 		e = fmt.Errorf("nil error was logged")
 	}
-	return ae.WithData("error", e.Error())
+
+	ae.trackCall()
+
+	if len(ae.info.calltracks) == 0 {
+		return ae.WithData("error", e.Error())
+	}
+
+	return ae.WithData("error", e.Error()).WithData("track", ae.info.calltracks)
+}
+
+func (ae *AuditEntry) ErrorfTrack(format string, values ...interface{}) error {
+	ae.trackCall()
+
+	return fmt.Errorf(format, values...)
 }
 
 //Creates a new global logger, this is singleton
