@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -280,4 +281,176 @@ func testPrint(ctx context.Context) {
 	log.AddTag("tag")
 
 	log.Info("test 2")
+}
+
+func TestHideData(t *testing.T) {
+	t.Parallel()
+
+	type SS struct {
+		SubTest1 string `json:"sub_test1"`
+		SubTest2 string `json:"sub_test2"`
+		SubTest3 string `json:"sub_test3"`
+	}
+
+	type S struct {
+		Test1  string            `json:"test1"`
+		Test2  string            `json:"test2"`
+		Test3  *SS               `json:"test3"`
+		Test4  int               `json:"test4"`
+		Test5  SS                `json:"test5"`
+		Test6  []SS              `json:"test6"`
+		Test7  [2]SS             `json:"test7"`
+		Test8  []*SS             `json:"test8"`
+		Test9  [2]*SS            `json:"test9"`
+		Test10 map[string]string `json:"test10"`
+		Test11 map[int]string    `json:"test11"`
+		Test12 map[string]*SS    `json:"test12"`
+		Test13 map[string]SS     `json:"test13"`
+		Test14 map[string][]SS   `json:"test14"`
+		Test15 *[2]SS            `json:"test15"`
+		Test16 string            `json:"test16.1"`
+	}
+
+	s1 := S{
+		Test1: "is-sensitive",
+		Test2: "non-sensitive",
+		Test3: &SS{
+			SubTest1: "is-sensitive",
+			SubTest2: "non-sensitive",
+			SubTest3: "is-sensitive",
+		},
+		Test5: SS{
+			SubTest1: "is-sensitive",
+			SubTest2: "non-sensitive",
+			SubTest3: "is-sensitive",
+		},
+		Test6: []SS{
+			{
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			},
+		},
+		Test7: [2]SS{
+			{
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			}, {
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			},
+		},
+		Test8: []*SS{
+			{
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			},
+		},
+		Test9: [2]*SS{
+			{
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			}, {
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			},
+		},
+		Test10: map[string]string{
+			"MapKey1": "is-sensitive",
+			"MapKey2": "non-sensitive",
+		},
+		Test11: map[int]string{
+			0: "non-sensitive",
+			1: "non-sensitive",
+		},
+		Test12: map[string]*SS{
+			"MapKey1": {
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			},
+			"MapKey2": {
+				SubTest1: "non-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "non-sensitive",
+			},
+		},
+		Test13: map[string]SS{
+			"MapKey1": {
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			},
+			"MapKey2": {
+				SubTest1: "non-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "non-sensitive",
+			},
+		},
+		Test14: map[string][]SS{
+			"MapKey1": {
+				{
+					SubTest1: "is-sensitive",
+					SubTest2: "non-sensitive",
+					SubTest3: "is-sensitive",
+				},
+			},
+		},
+		Test15: &[2]SS{
+			{
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			}, {
+				SubTest1: "is-sensitive",
+				SubTest2: "non-sensitive",
+				SubTest3: "is-sensitive",
+			},
+		},
+		Test16: "is-sensitive@gmail.com",
+	}
+
+	s2 := s1
+
+	log := NewGlobal("debug", "test")
+	log.AddSensitive("test1", "sub_test1", "MapKey1", "test16.1")
+	log.AddSensitive("sub_test3")
+
+	data, err := log.WithData("test", &s1).testLevel("debug", "test sensitive data 1")
+	if err != nil {
+		t.Fatal("fail to get log data")
+	}
+
+	err = json.Unmarshal(data, &map[string]interface{}{})
+	if err != nil {
+		t.Errorf("got error parsing json, %v, got %s", err, string(data))
+	}
+
+	if strings.Contains(string(data), "is-sensitive") {
+		t.Errorf("fail to hide information, got %s", string(data))
+	}
+
+	data, err = log.WithData("test", s2).testLevel("debug", "test sensitive data 2")
+	if err != nil {
+		t.Fatal("fail to get log data")
+	}
+
+	err = json.Unmarshal(data, &map[string]interface{}{})
+	if err != nil {
+		t.Errorf("got error parsing json, %v, got %v", err, string(data))
+	}
+
+	if strings.Contains(string(data), "is-sensitive") {
+		t.Errorf("fail to hide information, got %s", string(data))
+	}
+
+	if !strings.Contains(string(data), "non-sensitive") {
+		t.Errorf("fail to hide information, hide wrong information, got %s", string(data))
+	}
+
 }
