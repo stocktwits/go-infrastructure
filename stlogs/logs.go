@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -117,14 +118,16 @@ type Logger interface {
 	WithError(err error) Logger
 	NewEntry() Logger
 	NewWithContext(ctx context.Context) (Logger, context.Context)
+	AddSensitive(...string)
 	testLevel(level string, msg string) ([]byte, error)
 }
 
 //An audit logger, this is a singleton and implements the Logger interface
 type AuditLogger struct {
-	logger   *logrus.Logger
-	app      string
-	hostname string
+	logger    *logrus.Logger
+	app       string
+	hostname  string
+	sensitive []string
 }
 
 //Data that will be fw using the context
@@ -143,15 +146,32 @@ type AuditEntry struct {
 //Json formater
 type STJSONFormater struct {
 	logrus.JSONFormatter
+	re *regexp.Regexp
 }
 
-func getFormat() *STJSONFormater {
-	return &STJSONFormater{logrus.JSONFormatter{
-		FieldMap: logrus.FieldMap{
-			logrus.FieldKeyTime: "ts",
+func newSTJSONFormater(sensitive []string) *STJSONFormater {
+	var re *regexp.Regexp
+	if len(sensitive) > 0 {
+		qSensitive := []string{}
+		for _, s := range sensitive {
+			qSensitive = append(qSensitive, regexp.QuoteMeta(s))
+		}
+
+		keys := strings.Join(qSensitive, "|")
+		reString := fmt.Sprintf(`((\"|\')(%s)(\"|\'):\s*)((\"|\')?([^\"\'\{\[]+)(\"|\')?)`, keys)
+		fmt.Println(reString)
+		re = regexp.MustCompile(reString)
+	}
+
+	return &STJSONFormater{
+		JSONFormatter: logrus.JSONFormatter{
+			FieldMap: logrus.FieldMap{
+				logrus.FieldKeyTime: "ts",
+			},
+			PrettyPrint: prettyPrint,
 		},
-		PrettyPrint: prettyPrint,
-	}}
+		re: re,
+	}
 }
 
 //Re-implements Formater to change log level format
@@ -170,6 +190,11 @@ func (f *STJSONFormater) Format(entry *logrus.Entry) ([]byte, error) {
 		sdata = strings.Replace(sdata, "  \"level\": \""+slv+"\",\n", "", 1)
 	} else {
 		sdata = strings.Replace(sdata, "\"level\":\""+slv+"\",", "", 1)
+	}
+
+	if f.re != nil {
+		fmt.Println(sdata)
+		sdata = f.re.ReplaceAllString(sdata, `${1}"****"`)
 	}
 
 	return []byte(sdata), nil
@@ -260,6 +285,12 @@ func (ae *AuditEntry) NewWithContext(ctx context.Context) (Logger, context.Conte
 
 		return nae, newCtx
 	}
+}
+
+//Adds a key to be recognized as sensitive data. This will use for maps keys and structures field names
+func (ae *AuditEntry) AddSensitive(s ...string) {
+	ae.auditLogger.sensitive = append(ae.auditLogger.sensitive, s...)
+	ae.auditLogger.logger.SetFormatter(newSTJSONFormater(ae.auditLogger.sensitive))
 }
 
 //Adds a new entry to the data map
@@ -369,13 +400,7 @@ func NewGlobal(level string, app string) Logger {
 
 	singleLogger.logger.AddHook(&PrintHook{})
 
-	format := STJSONFormater{logrus.JSONFormatter{
-		FieldMap: logrus.FieldMap{
-			logrus.FieldKeyTime: "ts",
-		},
-	}}
-
-	singleLogger.logger.SetFormatter(&format)
+	singleLogger.logger.SetFormatter(newSTJSONFormater(nil))
 
 	return singleLogger.newAuditEntry()
 }
@@ -401,7 +426,7 @@ func newAuditLogger(module string) *AuditLogger {
 
 	al.logger.AddHook(&PrintHook{})
 
-	al.logger.SetFormatter(getFormat())
+	al.logger.SetFormatter(newSTJSONFormater(nil))
 	al.logger.SetOutput(al.logger.Out)
 
 	return al
