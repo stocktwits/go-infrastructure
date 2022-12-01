@@ -159,7 +159,6 @@ func newSTJSONFormater(sensitive []string) *STJSONFormater {
 
 		keys := strings.Join(qSensitive, "|")
 		reString := fmt.Sprintf(`((\"|\')(%s)(\"|\'):\s*)((\"|\')([^\"\']+)(\"|\')|[\d\.]+)`, keys)
-		fmt.Println(reString)
 		re = regexp.MustCompile(reString)
 	}
 
