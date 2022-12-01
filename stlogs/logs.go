@@ -192,7 +192,6 @@ func (f *STJSONFormater) Format(entry *logrus.Entry) ([]byte, error) {
 	}
 
 	if f.re != nil {
-		fmt.Println(sdata)
 		sdata = f.re.ReplaceAllString(sdata, `${1}"****"`)
 	}
 
