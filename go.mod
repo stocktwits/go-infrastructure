@@ -1,4 +1,4 @@
-module github.com/stocktwits/v2/go-infrastructure
+module github.com/stocktwits/go-infrastructure/v2
 
 go 1.23
 
