@@ -1,6 +1,6 @@
-module github.com/stocktwits/go-infrastructure
+module github.com/stocktwits/go-infrastructure/v2
 
-go 1.17
+go 1.23
 
 require (
 	github.com/aws/aws-sdk-go v1.44.45
