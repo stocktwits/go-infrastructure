@@ -11,7 +11,7 @@ type Formatter func(*DynamicValue) (*DynamicValue, error)
 // It takes a function that accepts a value of type T and returns a value of type S and an error.
 func NewFormatter[T, S any](f func(T) (S, error)) Formatter {
 	return func(dv *DynamicValue) (*DynamicValue, error) {
-		if dv == nil || dv.Value() == nil {
+		if dv == nil || dv.value == nil {
 			return dv, nil
 		}
 
@@ -23,7 +23,7 @@ func NewFormatter[T, S any](f func(T) (S, error)) Formatter {
 			return nil, fmt.Errorf("formatter function type mismatch with data type")
 		}
 
-		newVal, err := f(dv.Value().(T))
+		newVal, err := f(dv.value.(T))
 		if err != nil {
 			return nil, fmt.Errorf("error formatting data: %w", err)
 		}
