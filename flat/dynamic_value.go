@@ -96,11 +96,6 @@ func (d *DynamicValue) DataType() DataType {
 	return d.dataType
 }
 
-// Value returns the underlying data of the Value instance.
-func (d *DynamicValue) Value() any {
-	return d.value
-}
-
 // Error returns any error associated with the Data instance.
 func (d *DynamicValue) Error() error {
 	return d.err

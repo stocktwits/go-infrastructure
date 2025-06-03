@@ -50,52 +50,83 @@ func newErrorCsv(err error) *CSV {
 	}
 }
 
-// Export writes the CSV data to the provided writer.
+// Export writes the CSV data to the provided writers.
 // It writes the headers first, then the data rows.
 // If an error has occurred during the process, it returns an error.
 func (t *CSV) Export(w io.Writer) error {
+	return t.ExportSplit(NoSplit(w))
+}
+
+// ExportSplit writes the CSV data to multiple writers based on the provided Splits.
+// A Split contains a writer and an optional split function.
+// The split function is used to determine whether a row should be written to that writer.
+func (t *CSV) ExportSplit(splitters ...splitWriter) error {
 	if t.err != nil {
 		return fmt.Errorf("cannot export CSV due to previous error: %w", t.err)
 	}
 
-	csvWriter := csv.NewWriter(w)
+	csvWriters := make([]*csv.Writer, len(splitters))
+	for i, s := range splitters {
+		csvWriters[i] = csv.NewWriter(s)
+	}
 
 	rows := make(chan *row, bufferSize)
 	go t.streamRows(rows)
 
-	headers := make([]string, 0)
+	var headers []string
 	for row := range rows {
 		if row.hasHeaders() {
 			headers = row.getHeaders()
 
-			if err := csvWriter.Write(headers); err != nil {
-				return fmt.Errorf("failed to write CSV headers: %w", err)
-			}
-		}
-
-		values := make([]string, len(headers))
-		for j, header := range headers {
-			if value, exists := row.values[header]; exists {
-				val, err := value.strVal()
-				if err != nil {
-					return fmt.Errorf("failed to get value for header %s: %w", header, err)
+			for _, csvWriter := range csvWriters {
+				if err := csvWriter.Write(headers); err != nil {
+					return fmt.Errorf("failed to write CSV headers: %w", err)
 				}
-
-				values[j] = val
-			} else {
-				values[j] = ""
 			}
 		}
 
-		if err := csvWriter.Write(values); err != nil {
-			return fmt.Errorf("failed to write CSV data: %w", err)
+		for i, csvWriter := range csvWriters {
+			columnValues := make([]string, len(headers))
+			includeLine := true
+			for j, header := range headers {
+				if column, exists := row.columns[header]; exists {
+					// Check if the split function should include this line
+					shouldInclude, err := splitters[i].shouldInclude(header, column.data)
+					if err != nil {
+						return fmt.Errorf("error checking split condition for header %s: %w", header, err)
+					}
+
+					if !shouldInclude {
+						includeLine = false
+						break // Skip writing this line for this writer
+					}
+
+					val, err := column.strVal()
+					if err != nil {
+						return fmt.Errorf("failed to get value for header %s: %w", header, err)
+					}
+
+					columnValues[j] = val
+				}
+			}
+
+			if !includeLine {
+				continue // Skip writing this line for this writer
+			}
+
+			if err := csvWriter.Write(columnValues); err != nil {
+				return fmt.Errorf("failed to write CSV data: %w", err)
+			}
 		}
 	}
 
-	csvWriter.Flush()
-	if err := csvWriter.Error(); err != nil {
-		return fmt.Errorf("failed to flush CSV writer: %w", err)
+	for _, csvWriter := range csvWriters {
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			return fmt.Errorf("failed to flush CSV writer: %w", err)
+		}
 	}
+
 	return nil
 }
 
@@ -119,8 +150,7 @@ type Dest interface {
 // Source represents a source of data for CSV generation.
 // It provides methods to access data by index or key.
 type Source struct {
-	data     *DynamicValue
-	formater Formatter
+	data *DynamicValue
 }
 
 // Idx retrieves an element from the Source instance that holds an array or an array of objects.
@@ -147,23 +177,25 @@ func (s Source) Key(keys ...string) Source {
 // The formatter function is used to transform the data before it is written to the CSV.
 // If multiple formatters are applied, the last one will take precedence.
 func (s Source) format(formater Formatter) Source {
-	s.formater = formater
-	return s
+	if formater == nil {
+		return s
+	}
+
+	newData, err := formater(s.data)
+	if err != nil {
+		return Source{
+			data: errorDynamicValue(fmt.Errorf("error formatting data: %w", err)),
+		}
+	}
+
+	return Source{
+		data: newData,
+	}
 }
 
 // strVal retrieves the string representation of the data in the Source instance.
 func (s Source) strVal() (string, error) {
-	formattedData := s.data
-	if s.formater != nil {
-		newData, err := s.formater(s.data)
-		if err != nil {
-			return errorStrValue, fmt.Errorf("error formatting data: %w", err)
-		}
-
-		formattedData = newData
-	}
-
-	return formattedData.strVal()
+	return s.data.strVal()
 }
 
 // flattener is a function type that takes a Source and a Dest as arguments.
@@ -174,7 +206,7 @@ type flattener func(s Source, b Dest)
 // It contains a map of column names to their corresponding Source values,
 // a slice of headers (if applicable), and a flag indicating whether headers are included.
 type row struct {
-	values      map[string]Source
+	columns     map[string]Source
 	headers     []string
 	withHeaders bool
 }
@@ -183,7 +215,7 @@ type row struct {
 // If withHeaders is true, it initializes the headers slice to track column names.
 func newRow(withHeaders bool) *row {
 	r := &row{
-		values:      make(map[string]Source),
+		columns:     make(map[string]Source),
 		withHeaders: withHeaders,
 	}
 
@@ -211,7 +243,7 @@ func (r *row) ColFormatted(name string, value Source, formatter Formatter) {
 		value = value.format(formatter)
 	}
 
-	r.values[name] = value
+	r.columns[name] = value
 }
 
 // hasHeaders checks if the row has headers.
@@ -236,7 +268,7 @@ func (t *CSV) streamRows(rows chan *row) {
 		t.flattener(s, d)
 		rows <- d
 	case DataTypeArray:
-		arr := t.rootData.Value().([]any)
+		arr := t.rootData.value.([]any)
 		for i, item := range arr {
 			s := Source{data: newDynamicValue(item)}
 			d := newRow(i == 0) // Only write headers for the first item
@@ -244,7 +276,7 @@ func (t *CSV) streamRows(rows chan *row) {
 			rows <- d
 		}
 	case DataTypeArrayOfObjects:
-		arr := t.rootData.Value().([]map[string]any)
+		arr := t.rootData.value.([]map[string]any)
 		for i, item := range arr {
 			s := Source{data: newDynamicValue(item)}
 			d := newRow(i == 0) // Only write headers for the first item
@@ -252,7 +284,7 @@ func (t *CSV) streamRows(rows chan *row) {
 			rows <- d
 		}
 	case DataTypeStreamOfObjects:
-		reader := t.rootData.Value().(io.Reader)
+		reader := t.rootData.value.(io.Reader)
 		decoder := json.NewDecoder(reader)
 
 		withHeaders := true
