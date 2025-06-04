@@ -153,6 +153,14 @@ type Source struct {
 	data *DynamicValue
 }
 
+// FixValue creates a new Source instance with a fixed value.
+// This is useful when you want to include a constant value in the CSV output.
+func FixValue[T any](value T) Source {
+	// Create a new DynamicValue from the provided value
+	dv := newDynamicValue(value)
+	return Source{data: dv}
+}
+
 // Idx retrieves an element from the Source instance that holds an array or an array of objects.
 // If the index is out of bounds or the data type is not an array, it returns a new Source with NullData.
 // If the data is not an array, it returns a new Source with NullData.
