@@ -34,8 +34,8 @@ type PriceFormatted struct {
 	RawValue          string
 	CurrencyCode      string
 	CurrencyString    string
-	ZerosAfterDecimal int
-	AfterZerosValue   int64
+	ZerosAfterDecimal *int
+	AfterZerosValue   *int64
 }
 
 // TryFormat attempts to format a price with the default currency code (USD).
@@ -116,8 +116,8 @@ func FormatWithCurrency[T priceInput](price T, currencyCode string) (*PriceForma
 	afterZerosValue := afterZerosValueDecimal.IntPart()
 
 	priceData.UseSubscript = true
-	priceData.ZerosAfterDecimal = leadingZeroesCount
-	priceData.AfterZerosValue = afterZerosValue
+	priceData.ZerosAfterDecimal = &leadingZeroesCount
+	priceData.AfterZerosValue = &afterZerosValue
 
 	return priceData, nil
 }
