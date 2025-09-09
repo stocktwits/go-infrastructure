@@ -23,6 +23,12 @@ const (
 // defaultCurrencyCode is the default currency code used when formatting prices.
 const defaultCurrencyCode = CurrencyCodeUSD
 
+// defaultSubscriptLength is the minimum number of leading zeros required to use subscript formatting.
+const defaultSubscriptLength = 5
+
+// defaultValueLength is the maximum number of digits to include in the after zeros value.
+const defaultValueLength = 4
+
 // priceInput is a type constraint for price inputs that can be formatted.
 type priceInput interface {
 	~string | ~float64 | ~int | decimal.Decimal
@@ -34,6 +40,7 @@ type PriceFormatted struct {
 	RawValue          string
 	CurrencyCode      string
 	CurrencyString    string
+	IsNegative        bool
 	ZerosAfterDecimal *int
 	AfterZerosValue   *int64
 }
@@ -60,6 +67,11 @@ func TryFormatWithCurrency[T priceInput](price T, currencyCode string) *PriceFor
 
 // FormatWithCurrency gets formatting data for a price, primarily for handling small decimals.
 func FormatWithCurrency[T priceInput](price T, currencyCode string) (*PriceFormatted, error) {
+	return FormatWithOptions(price, currencyCode, defaultSubscriptLength, defaultValueLength)
+}
+
+// FormatWithOptions gets formatting data for a price with configurable subscript and value length parameters.
+func FormatWithOptions[T priceInput](price T, currencyCode string, subscriptLength, valueLength int) (*PriceFormatted, error) {
 	dPrice, err := getDecimalValue(price)
 	if err != nil {
 		return nil, fmt.Errorf("error converting price to decimal: %w", err)
@@ -70,14 +82,15 @@ func FormatWithCurrency[T priceInput](price T, currencyCode string) (*PriceForma
 		RawValue:       dPrice.String(),
 		CurrencyCode:   currencyCode,
 		CurrencyString: getCurrencySymbol(currencyCode),
+		IsNegative:     dPrice.IsNegative(),
 	}
 
 	// If the price is not a small decimal, return the basic data.
-	if dPrice.IsZero() || dPrice.GreaterThanOrEqual(decimal.NewFromInt(1)) {
+	if dPrice.IsZero() || dPrice.Abs().GreaterThanOrEqual(decimal.NewFromInt(1)) {
 		return priceData, nil
 	}
 
-	strPrice := dPrice.String()
+	strPrice := dPrice.Abs().String()
 
 	// If the price does not contain a decimal point, it is not a small decimal.
 	// We return the basic data without subscript formatting.
@@ -108,14 +121,23 @@ func FormatWithCurrency[T priceInput](price T, currencyCode string) (*PriceForma
 		return priceData, nil
 	}
 
-	afterZerosValueDecimal, err := decimal.NewFromString(decimalPart[leadingZeroesCount:])
+	// Get the value after zeros, limited by valueLength
+	afterZerosStr := decimalPart[leadingZeroesCount:]
+	if len(afterZerosStr) > valueLength {
+		afterZerosStr = afterZerosStr[:valueLength]
+	}
+	if afterZerosStr == "" {
+		afterZerosStr = "0"
+	}
+
+	afterZerosValueDecimal, err := decimal.NewFromString(afterZerosStr)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing after zeros value: %w", err)
 	}
 
 	afterZerosValue := afterZerosValueDecimal.IntPart()
 
-	priceData.UseSubscript = true
+	priceData.UseSubscript = leadingZeroesCount >= subscriptLength
 	priceData.ZerosAfterDecimal = &leadingZeroesCount
 	priceData.AfterZerosValue = &afterZerosValue
 
