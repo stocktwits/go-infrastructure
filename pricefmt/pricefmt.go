@@ -164,7 +164,7 @@ func getDecimalValue(price any) (decimal.Decimal, error) {
 func getCurrencySymbol(currencyCode string) string {
 	switch currencyCode {
 	case CurrencyCodeUSD:
-		return "US$"
+		return "$"
 	case CurrencyCodeEUR:
 		return "€"
 	case CurrencyCodeGBP:
